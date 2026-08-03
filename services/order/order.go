@@ -186,7 +186,54 @@ func (o *OrderService) Create(ctx context.Context, request *dto.OrderRequest) (*
 			return txErr
 		}
 
+		expiredAt := time.Now().Add(1 * time.Hour)
+		description := fmt.Sprintf("Pembayaran Sewa %s", field.FieldName)
+		paymentResponse, txErr = o.client.GetPayment().CreatePaymentLink(ctx, &dto.PaymentRequest{
+			OrderID:     order.UUID,
+			ExpiredAt:   expiredAt,
+			Amount:      totalAmount,
+			Description: description,
+			CustomerDetail: dto.CustomerDetail{
+				Name:  user.Name,
+				Email: user.Email,
+				Phone: user.PhoneNumber,
+			},
+			ItemDetails: []dto.ItemDetails{
+				{
+					ID:       uuid.New(),
+					Name:     description,
+					Amount:   totalAmount,
+					Quantity: 1,
+				},
+			},
+		})
+		if txErr != nil {
+			return txErr
+		}
+
+		txErr = o.repository.GetOrder().Update(ctx, tx, &models.Order{
+			PaymentID: paymentResponse.UUID,
+		}, order.UUID)
+		if txErr != nil {
+			return txErr
+		}
+
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
+	response := dto.OrderResponse{
+		UUID:        order.UUID,
+		Code:        order.Code,
+		UserName:    user.Name,
+		Amount:      order.Amount,
+		Status:      order.Status.GetStatusString(),
+		OrderDate:   order.Date,
+		PaymentLink: paymentResponse.PaymentLink,
+		CreatedAt:   *order.CreatedAt,
+		UpdatedAt:   *order.UpdatedAt,
+	}
+	return &response, nil
 }
