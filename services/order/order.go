@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"order-service/clients"
+	clientUser "order-service/clients/user"
 	"order-service/common/util"
 	"order-service/domain/dto"
+	"order-service/domain/models"
 	"order-service/repositories"
 )
 
@@ -56,5 +58,34 @@ func (o *OrderService) GetAllWithPagination(ctx context.Context, param *dto.Orde
 	}
 
 	response := util.GeneratePagination(paginationParam)
+	return &response, nil
+}
+
+func (o *OrderService) GetByUUID(ctx context.Context, uuid string) (*dto.OrderResponse, error) {
+	var (
+		order *models.Order
+		user  *clientUser.UserData
+		err   error
+	)
+	order, err = o.repository.GetOrder().FindByUUID(ctx, uuid)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err = o.client.GetUser().GetUserByUUID(ctx, order.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	response := dto.OrderResponse{
+		UUID:      order.UUID,
+		Code:      order.Code,
+		UserName:  user.Name,
+		Amount:    order.Amount,
+		Status:    order.Status.GetStatusString(),
+		OrderDate: order.Date,
+		CreatedAt: *order.CreatedAt,
+		UpdatedAt: *order.UpdatedAt,
+	}
 	return &response, nil
 }
