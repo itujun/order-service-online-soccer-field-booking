@@ -237,3 +237,85 @@ func (o *OrderService) Create(ctx context.Context, request *dto.OrderRequest) (*
 	}
 	return &response, nil
 }
+
+func (o *OrderService) mapPaymentStatusToOrder(request *dto.PaymentData) (constants.OrderStatus, *models.Order) {
+	var (
+		status constants.OrderStatus
+		order  *models.Order
+	)
+
+	switch request.Status {
+	case constants.SettlementPaymentStatus:
+		status = constants.PaymentSuccess
+		order = &models.Order{
+			IsPaid:    true,
+			PaymentID: request.PaymentID,
+			PaidAt:    request.PaidAt,
+			Status:    status,
+		}
+	case constants.ExpirePaymentStatus:
+		status = constants.Expired
+		order = &models.Order{
+			IsPaid:    false,
+			PaymentID: request.PaymentID,
+			Status:    status,
+		}
+	case constants.PendingPaymentStatus:
+		status = constants.PendingPayment
+		order = &models.Order{
+			IsPaid:    false,
+			PaymentID: request.PaymentID,
+			Status:    status,
+		}
+	}
+	return status, order
+}
+
+func (o *OrderService) HandlePayment(ctx context.Context, request *dto.PaymentData) error {
+	var (
+		err, txErr          error
+		order               *models.Order
+		orderFieldSchedules []models.OrderField
+	)
+	status, body := o.mapPaymentStatusToOrder(request)
+	err = o.repository.GetTx().Transaction(func(tx *gorm.DB) error {
+		txErr = o.repository.GetOrder().Update(ctx, tx, body, request.OrderID)
+		if txErr != nil {
+			return txErr
+		}
+
+		order, txErr = o.repository.GetOrder().FindByUUID(ctx, request.OrderID.String())
+		if txErr != nil {
+			return txErr
+		}
+
+		txErr = o.repository.GetOrderHistory().Create(ctx, tx, &dto.OrderHistoryRequest{
+			Status:  status.GetStatusString(),
+			OrderID: order.ID,
+		})
+
+		if request.Status == constants.SettlementPaymentStatus {
+			orderFieldSchedules, txErr = o.repository.GetOrderField().FindByOrderID(ctx, order.ID)
+			if txErr != nil {
+				return txErr
+			}
+
+			filedScheduleIDs := make([]string, 0, len(orderFieldSchedules))
+			for _, item := range orderFieldSchedules {
+				filedScheduleIDs = append(filedScheduleIDs, item.FieldScheduleID.String())
+			}
+
+			txErr = o.client.GetField().UpdateStatus(&dto.UpdateFieldScheduleStatusRequest{
+				FieldScheduleIDs: filedScheduleIDs,
+			})
+			if txErr != nil {
+				return txErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
