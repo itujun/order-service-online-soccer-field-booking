@@ -130,3 +130,51 @@ func (o *OrderRepository) incrementCode(ctx context.Context) (*string, error) {
 
 	return &result, nil
 }
+
+func (o *OrderRepository) Create(
+	ctx context.Context,
+	tx *gorm.DB,
+	param *models.Order,
+) (*models.Order, error) {
+	code, err := o.incrementCode(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	order := &models.Order{
+		UUID:   uuid.New(),
+		Code:   *code,
+		UserID: param.UserID,
+		Amount: param.Amount,
+		Date:   param.Date,
+		Status: param.Status,
+		IsPaid: param.IsPaid,
+	}
+
+	err = tx.
+		WithContext(ctx).
+		Create(order).
+		Error
+	if err != nil {
+		return nil, errWrap.WrapError(errConstant.ErrSQLError)
+	}
+	return order, nil
+}
+
+func (o *OrderRepository) Update(
+	ctx context.Context,
+	tx *gorm.DB,
+	request *models.Order,
+	uuid uuid.UUID,
+) error {
+	err := tx.
+		WithContext(ctx).
+		Model(&models.Order{}).
+		Where("uuid = ?", uuid).
+		Updates(request).
+		Error
+	if err != nil {
+		return errWrap.WrapError(errConstant.ErrSQLError)
+	}
+	return nil
+}
